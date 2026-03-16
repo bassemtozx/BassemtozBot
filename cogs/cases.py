@@ -20,6 +20,7 @@ from utils.perms import is_staff, is_judge, is_admin, can_manage_case, can_issue
 from utils.embeds import build_case_embed, build_verdict_announce_embed, build_list_embed
 from utils.log_channel import send_log_embed
 from utils.transcript import export_transcript
+from utils.punishment import parse_punishment_duration
 
 
 def _now():
@@ -226,8 +227,30 @@ class CasesCog(commands.Cog):
         q.set_verdict(case_id, verdict_type, reason, punishment_duration or None, appeal_ok)
         q.lock_verdict(case_id)
         q.log_action(case_id, interaction.user.id, "إصدار الحكم", verdict_type)
-        await interaction.response.send_message("تم تسجيل الحكم وقفله.", ephemeral=True)
         case = q.get_case_by_id(case_id)
+        timeout_applied = False
+        if case.get("defendant_user_id") and punishment_duration:
+            duration_delta = parse_punishment_duration(punishment_duration)
+            if duration_delta and interaction.guild:
+                member = interaction.guild.get_member(case["defendant_user_id"])
+                if member:
+                    try:
+                        await member.timeout(
+                            duration_delta,
+                            reason=f"حكم قضية {case_id}: {verdict_type} — {reason[:400]}",
+                        )
+                        timeout_applied = True
+                        q.log_action(case_id, interaction.user.id, "تنفيذ Timeout على المتهم", str(duration_delta))
+                    except discord.Forbidden:
+                        q.log_action(case_id, interaction.user.id, "فشل Timeout (صلاحيات)", str(case["defendant_user_id"]))
+                    except Exception as e:
+                        q.log_action(case_id, interaction.user.id, "فشل Timeout", str(e))
+        msg = "تم تسجيل الحكم وقفله."
+        if timeout_applied:
+            msg += " تم تنفيذ العقوبة (Timeout) على المتهم."
+        elif case.get("defendant_user_id") and punishment_duration:
+            msg += " (لم يتم تطبيق Timeout — تأكد من إضافة المتهم عبر /case_add_defendant وصلاحيات البوت)"
+        await interaction.response.send_message(msg, ephemeral=True)
         emb = build_case_embed(case, interaction.guild)
         view = CaseActionsView(case_id, self)
         if interaction.channel and isinstance(interaction.channel, discord.TextChannel):
