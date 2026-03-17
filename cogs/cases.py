@@ -36,7 +36,7 @@ class CasesCog(commands.Cog):
 
     async def _case_channel_overwrites(self, guild: discord.Guild, creator_id: int) -> dict:
         overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
         }
         creator = guild.get_member(creator_id)
