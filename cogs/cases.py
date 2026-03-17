@@ -271,7 +271,7 @@ class CasesCog(commands.Cog):
         if timeout_applied:
             msg += " تم تنفيذ العقوبة (Timeout) على المتهم."
         elif case.get("defendant_user_id") and punishment_duration:
-            msg += " (لم يتم تطبيق Timeout — تأكد من إضافة المتهم عبر /case_add_defendant وصلاحيات البوت)"
+            msg += " (لم يتم تطبيق Timeout — تأكد من إضافة المتهم عبر /add وصلاحيات البوت)"
         await interaction.response.send_message(msg, ephemeral=True)
         emb = build_case_embed(case, interaction.guild)
         view = CaseActionsView(case_id, self)
@@ -509,7 +509,7 @@ class CasesCog(commands.Cog):
         q.log_action(case_id.strip(), interaction.user.id, "تعيين قاضٍ", str(judge_member.id))
         await interaction.response.send_message(f"تم تعيين {judge_member.mention} قاضياً للقضية.", ephemeral=True)
 
-    @app_commands.command(name="case_add_defendant", description="إضافة المتهم (عضو) للقضية")
+    @app_commands.command(name="add", description="إضافة المتهم (عضو) للقضية")
     @app_commands.describe(case_id="رقم القضية", member="العضو")
     async def case_add_defendant(
         self,
