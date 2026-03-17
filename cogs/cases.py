@@ -274,22 +274,24 @@ class CasesCog(commands.Cog):
                 await ch.send(embed=ann)
         await send_log_embed(self.bot, case_id, "صدر الحكم", interaction.user, verdict_type)
 
-    async def _move_channel_to_closed(self, channel_id: int, guild: discord.Guild) -> bool:
+    async def _move_channel_to_closed(
+        self, channel_id: int, guild: discord.Guild, channel_obj: discord.TextChannel | None = None
+    ) -> tuple[bool, str]:
         if not CLOSED_CASES_CATEGORY_ID:
-            return False
-        ch = guild.get_channel(channel_id)
+            return False, "CLOSED_CASES_CATEGORY_ID غير مضبوط"
+        ch = channel_obj or guild.get_channel(channel_id)
         if not ch and channel_id:
             try:
                 ch = await self.bot.fetch_channel(channel_id)
-            except Exception:
-                return False
-        if ch and isinstance(ch, discord.TextChannel):
-            try:
-                await ch.edit(category_id=CLOSED_CASES_CATEGORY_ID)
-                return True
-            except Exception:
-                return False
-        return False
+            except Exception as e:
+                return False, str(e)
+        if not ch or not isinstance(ch, discord.TextChannel):
+            return False, "القناة غير موجودة"
+        try:
+            await ch.edit(category_id=CLOSED_CASES_CATEGORY_ID)
+            return True, ""
+        except Exception as e:
+            return False, str(e)
 
     async def on_close(self, interaction: discord.Interaction, case_id: str):
         case = q.get_case_by_id(case_id)
@@ -298,12 +300,15 @@ class CasesCog(commands.Cog):
             return
         q.update_case_status(case_id, "مغلقة", _now())
         q.log_action(case_id, interaction.user.id, "إغلاق القضية", None)
-        moved = False
-        if interaction.guild and case.get("channel_id"):
-            moved = await self._move_channel_to_closed(case["channel_id"], interaction.guild)
+        ch_obj = None
+        if interaction.channel and interaction.channel.id == case.get("channel_id"):
+            ch_obj = interaction.channel
+        moved, err = await self._move_channel_to_closed(
+            case.get("channel_id") or 0, interaction.guild, ch_obj
+        ) if interaction.guild else (False, "لا يوجد سيرفر")
         msg = "تم إغلاق القضية."
-        if not moved and case.get("channel_id"):
-            msg += " (لم يتم نقل القناة لفئة القضايا المغلقة — تحقق من CLOSED_CASES_CATEGORY_ID وصلاحيات البوت)"
+        if not moved:
+            msg += f" (نقل القناة فشل: {err[:200]})"
         await interaction.response.send_message(msg, ephemeral=True)
 
     async def on_archive(self, interaction: discord.Interaction, case_id: str):
@@ -329,7 +334,8 @@ class CasesCog(commands.Cog):
         q.update_case_status(case_id, "مؤرشفة", _now())
         q.log_action(case_id, interaction.user.id, "أرشفة القضية", None)
         if interaction.guild and case.get("channel_id"):
-            await self._move_channel_to_closed(case["channel_id"], interaction.guild)
+            ch_obj = interaction.channel if (interaction.channel and interaction.channel.id == case.get("channel_id")) else None
+            await self._move_channel_to_closed(case["channel_id"], interaction.guild, ch_obj)
         await interaction.response.send_message("تم أرشفة القضية.", ephemeral=True)
 
     async def on_reopen(self, interaction: discord.Interaction, case_id: str):
@@ -575,12 +581,13 @@ class CasesCog(commands.Cog):
             return
         q.update_case_status(case_id.strip(), "مغلقة", _now())
         q.log_action(case_id.strip(), interaction.user.id, "إغلاق القضية", None)
-        moved = False
+        moved, err = False, ""
         if interaction.guild and case.get("channel_id"):
-            moved = await self._move_channel_to_closed(case["channel_id"], interaction.guild)
+            ch_obj = interaction.channel if (interaction.channel and interaction.channel.id == case.get("channel_id")) else None
+            moved, err = await self._move_channel_to_closed(case["channel_id"], interaction.guild, ch_obj)
         msg = "تم إغلاق القضية."
         if not moved and case.get("channel_id"):
-            msg += " (لم يتم نقل القناة — تحقق من CLOSED_CASES_CATEGORY_ID)"
+            msg += f" (نقل القناة فشل: {err[:200]})"
         await interaction.response.send_message(msg, ephemeral=True)
 
     @app_commands.command(name="case_archive", description="أرشفة القضية")
@@ -611,7 +618,8 @@ class CasesCog(commands.Cog):
         q.update_case_status(case_id.strip(), "مؤرشفة", _now())
         q.log_action(case_id.strip(), interaction.user.id, "أرشفة القضية", None)
         if interaction.guild and case.get("channel_id"):
-            await self._move_channel_to_closed(case["channel_id"], interaction.guild)
+            ch_obj = interaction.channel if (interaction.channel and interaction.channel.id == case.get("channel_id")) else None
+            await self._move_channel_to_closed(case["channel_id"], interaction.guild, ch_obj)
         await interaction.response.send_message("تم أرشفة القضية.", ephemeral=True)
 
     @app_commands.command(name="case_reopen", description="إعادة فتح القضية")
