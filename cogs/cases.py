@@ -288,7 +288,10 @@ class CasesCog(commands.Cog):
         self, channel_id: int, guild: discord.Guild, channel_obj: discord.TextChannel | None = None
     ) -> tuple[bool, str]:
         if not CLOSED_CASES_CATEGORY_ID:
-            return False, "CLOSED_CASES_CATEGORY_ID غير مضبوط"
+            return False, "CLOSED_CASES_CATEGORY_ID غير مضبوط في Variables"
+        category = guild.get_channel(CLOSED_CASES_CATEGORY_ID)
+        if not category or not isinstance(category, discord.CategoryChannel):
+            return False, "فئة القضايا المغلقة غير موجودة أو الرقم غلط"
         ch = channel_obj or guild.get_channel(channel_id)
         if not ch and channel_id:
             try:
@@ -298,8 +301,10 @@ class CasesCog(commands.Cog):
         if not ch or not isinstance(ch, discord.TextChannel):
             return False, "القناة غير موجودة"
         try:
-            await ch.edit(category_id=CLOSED_CASES_CATEGORY_ID)
+            await ch.edit(category=category)
             return True, ""
+        except discord.Forbidden:
+            return False, "البوت محتاج صلاحية Manage Channels"
         except Exception as e:
             return False, str(e)
 
