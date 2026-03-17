@@ -71,77 +71,87 @@ class CasesCog(commands.Cog):
         try:
             await interaction.response.defer(ephemeral=True)
         except Exception:
-            pass
-        guild = interaction.guild
-        creator_id = interaction.user.id
-        defendant_user_id = None
-        for mention in getattr(interaction, "resolved", {}).values() or []:
-            if hasattr(mention, "id"):
-                defendant_user_id = mention.id
-                break
+            try:
+                await interaction.response.send_message("حدث خطأ عند الاستجابة. جرّب مرة أخرى.", ephemeral=True)
+            except Exception:
+                pass
+            return
         try:
-            case_id = q.next_case_id(guild.id)
+            guild = interaction.guild
+            creator_id = interaction.user.id
+            defendant_user_id = None
+            for mention in getattr(interaction, "resolved", {}).values() or []:
+                if hasattr(mention, "id"):
+                    defendant_user_id = mention.id
+                    break
+            try:
+                case_id = q.next_case_id(guild.id)
+            except Exception as e:
+                await interaction.followup.send(f"خطأ في إنشاء رقم القضية: {e}", ephemeral=True)
+                return
+            category = guild.get_channel(OPEN_CASES_CATEGORY_ID) if OPEN_CASES_CATEGORY_ID else None
+            if not category or not isinstance(category, discord.CategoryChannel):
+                await interaction.followup.send(
+                    "لم يتم ضبط فئة قنوات القضايا المفتوحة (OPEN_CASES_CATEGORY_ID). راجع الإعدادات.",
+                    ephemeral=True,
+                )
+                return
+            overwrites = await self._case_channel_overwrites(guild, creator_id)
+            channel_name = case_id.lower().replace("-", "")
+            try:
+                ch = await guild.create_text_channel(
+                    name=channel_name,
+                    category=category,
+                    overwrites=overwrites,
+                    topic=f"القضية {case_id} — مقدم الشكوى: {interaction.user.display_name}",
+                )
+            except discord.Forbidden:
+                await interaction.followup.send("البوت لا يملك صلاحية إنشاء قنوات.", ephemeral=True)
+                return
+            except Exception as e:
+                await interaction.followup.send(f"فشل إنشاء القناة: {e}", ephemeral=True)
+                return
+            try:
+                q.create_case(
+                    case_id,
+                    guild.id,
+                    ch.id,
+                    creator_id,
+                    defendant_text,
+                    defendant_user_id,
+                    case_type,
+                    description,
+                    evidence,
+                    witnesses or "",
+                )
+            except Exception as e:
+                await ch.delete(reason="Rollback after DB error")
+                await interaction.followup.send(f"خطأ في حفظ القضية: {e}", ephemeral=True)
+                return
+            q.log_action(case_id, creator_id, "إنشاء القضية", None)
+            try:
+                case = q.get_case_by_id(case_id)
+                emb = build_case_embed(case, guild)
+                view = CaseActionsView(case_id, self)
+                await ch.send(embed=emb, view=view)
+                await interaction.followup.send(
+                    f"تم إنشاء القضية **{case_id}** وقناتها: {ch.mention}",
+                    ephemeral=True,
+                )
+            except Exception as e:
+                await interaction.followup.send(
+                    f"تم إنشاء القضية **{case_id}** وقناتها: {ch.mention}. (تحذير: فشل إرسال تفاصيل داخل القناة: {e})",
+                    ephemeral=True,
+                )
+            try:
+                await send_log_embed(self.bot, case_id, "قضية جديدة", interaction.user, case_id)
+            except Exception:
+                pass
         except Exception as e:
-            await interaction.followup.send(f"خطأ في إنشاء رقم القضية: {e}", ephemeral=True)
-            return
-        category = guild.get_channel(OPEN_CASES_CATEGORY_ID) if OPEN_CASES_CATEGORY_ID else None
-        if not category or not isinstance(category, discord.CategoryChannel):
-            await interaction.followup.send(
-                "لم يتم ضبط فئة قنوات القضايا المفتوحة (OPEN_CASES_CATEGORY_ID). راجع الإعدادات.",
-                ephemeral=True,
-            )
-            return
-        overwrites = await self._case_channel_overwrites(guild, creator_id)
-        channel_name = case_id.lower().replace("-", "")
-        try:
-            ch = await guild.create_text_channel(
-                name=channel_name,
-                category=category,
-                overwrites=overwrites,
-                topic=f"القضية {case_id} — مقدم الشكوى: {interaction.user.display_name}",
-            )
-        except discord.Forbidden:
-            await interaction.followup.send("البوت لا يملك صلاحية إنشاء قنوات.", ephemeral=True)
-            return
-        except Exception as e:
-            await interaction.followup.send(f"فشل إنشاء القناة: {e}", ephemeral=True)
-            return
-        try:
-            q.create_case(
-                case_id,
-                guild.id,
-                ch.id,
-                creator_id,
-                defendant_text,
-                defendant_user_id,
-                case_type,
-                description,
-                evidence,
-                witnesses or "",
-            )
-        except Exception as e:
-            await ch.delete(reason="Rollback after DB error")
-            await interaction.followup.send(f"خطأ في حفظ القضية: {e}", ephemeral=True)
-            return
-        q.log_action(case_id, creator_id, "إنشاء القضية", None)
-        try:
-            case = q.get_case_by_id(case_id)
-            emb = build_case_embed(case, guild)
-            view = CaseActionsView(case_id, self)
-            await ch.send(embed=emb, view=view)
-            await interaction.followup.send(
-                f"تم إنشاء القضية **{case_id}** وقناتها: {ch.mention}",
-                ephemeral=True,
-            )
-        except Exception as e:
-            await interaction.followup.send(
-                f"تم إنشاء القضية **{case_id}** وقناتها: {ch.mention}. (تحذير: فشل إرسال تفاصيل داخل القناة: {e})",
-                ephemeral=True,
-            )
-        try:
-            await send_log_embed(self.bot, case_id, "قضية جديدة", interaction.user, case_id)
-        except Exception:
-            pass
+            try:
+                await interaction.followup.send(f"حدث خطأ: {str(e)[:300]}", ephemeral=True)
+            except Exception:
+                pass
 
     def _get_guild(self, interaction: discord.Interaction) -> discord.Guild | None:
         return interaction.guild
